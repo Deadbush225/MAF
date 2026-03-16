@@ -36,6 +36,7 @@ const caeAgentRtcUid = process.env.AGORA_CAE_AGENT_RTC_UID || "0";
 const caeTtsVendor = process.env.AGORA_CAE_TTS_VENDOR || "microsoft";
 const caeTtsParamsJson = process.env.AGORA_CAE_TTS_PARAMS_JSON || "{}";
 const caeRequestTimeoutMs = Number(process.env.AGORA_CAE_REQUEST_TIMEOUT_MS || 12000);
+const geminiApiKey = process.env.GEMINI_API_KEY || "";
 
 app.use(cors());
 app.use(express.json());
@@ -66,6 +67,10 @@ function getCaeConfigIssues() {
     if (!ttsParams.api_key) issues.push("AGORA_CAE_TTS_PARAMS_JSON.api_key is missing");
     if (!ttsParams.voice_id) issues.push("AGORA_CAE_TTS_PARAMS_JSON.voice_id is missing");
     if (!ttsParams.model_id) issues.push("AGORA_CAE_TTS_PARAMS_JSON.model_id is missing");
+  } else if (ttsVendor === "gemini" || ttsVendor === "google") {
+    if (!(ttsParams.api_key || geminiApiKey)) {
+      issues.push("AGORA_CAE_TTS_PARAMS_JSON.api_key or GEMINI_API_KEY is missing");
+    }
   }
 
   return issues;
@@ -89,7 +94,24 @@ function hasRequiredTtsConfig(ttsParams) {
   const ttsVendor = String(caeTtsVendor || "").toLowerCase();
   if (ttsVendor === "microsoft") return Boolean(ttsParams.key && ttsParams.region && ttsParams.voice_name);
   if (ttsVendor === "elevenlabs") return Boolean(ttsParams.api_key && ttsParams.voice_id && ttsParams.model_id);
+  if (ttsVendor === "gemini" || ttsVendor === "google") return Boolean(ttsParams.api_key || geminiApiKey);
   return true;
+}
+
+function buildTtsPayload(ttsParams) {
+  const ttsVendor = String(caeTtsVendor || "").toLowerCase();
+  if (ttsVendor === "gemini" || ttsVendor === "google") {
+    return {
+      vendor: "google",
+      params: {
+        api_key: ttsParams.api_key || geminiApiKey,
+        model: ttsParams.model || "gemini-2.5-flash-preview-tts",
+        voice_name: ttsParams.voice_name || "Kore",
+        language_code: ttsParams.language_code || "fil-PH",
+      },
+    };
+  }
+  return { vendor: caeTtsVendor, params: ttsParams };
 }
 
 app.get("/health", (_req, res) => {
@@ -122,9 +144,10 @@ app.post("/conversationalAgent/start", async (req, res) => {
     if (!hasRequiredTtsConfig(ttsParams)) {
       return res.status(400).json({
         error:
-          "Missing TTS config. For microsoft set key/region/voice_name. For elevenlabs set api_key/voice_id/model_id.",
+          "Missing TTS config. For microsoft set key/region/voice_name. For elevenlabs set api_key/voice_id/model_id. For gemini/google set api_key (or GEMINI_API_KEY).",
       });
     }
+    const ttsPayload = buildTtsPayload(ttsParams);
 
     const joinUrl = `https://api.agora.io/api/conversational-ai-agent/v2/projects/${agoraAppId}/join`;
     const payload = {
@@ -146,8 +169,8 @@ app.post("/conversationalAgent/start", async (req, res) => {
         },
         asr: { language: caeAsrLanguage },
         tts: {
-          vendor: caeTtsVendor,
-          params: ttsParams,
+          vendor: ttsPayload.vendor,
+          params: ttsPayload.params,
         },
       },
     };

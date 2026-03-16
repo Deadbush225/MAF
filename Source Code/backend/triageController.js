@@ -22,9 +22,7 @@ Rules:
 - recommendation: clinic workflow only — scheduling, walk-in, or ER referral. Never suggest medications, tests, or treatments.
 - confidence: 90+ if pattern is very clear, 60–89 if partially clear, below 60 if vague or insufficient.
 - missing_info_questions: max 2 questions to clarify urgency; empty array [] if information is already sufficient.
-- missing_info_questions: use the patient's primary language (Tagalog or English).
-- If the patient mainly speaks Tagalog, write summary, possible_issue, recommendation, and missing_info_questions in Tagalog.
-- If the patient mainly speaks English, write summary, possible_issue, recommendation, and missing_info_questions in English.
+- missing_info_questions: write questions in natural Tagalog.
 - NEVER act as a physician. A licensed doctor will evaluate the patient.`;
 
 const SYMPTOM_SIGNAL_MAP = [
@@ -53,47 +51,8 @@ const SYMPTOM_SIGNAL_MAP = [
   { label: "Diarrhea", terms: ["diarrhea", "pagtatae", "malabnaw na dumi"] },
 ];
 
-const TAGALOG_LANGUAGE_MARKERS = [
-  "ang",
-  "mga",
-  "ako",
-  "ko",
-  "mo",
-  "siya",
-  "kami",
-  "kayo",
-  "po",
-  "opo",
-  "hindi",
-  "wala",
-  "meron",
-  "may",
-  "masakit",
-  "sakit",
-  "ulo",
-  "dibdib",
-  "lagnat",
-  "ubo",
-  "sipon",
-  "nahihilo",
-  "pagtatae",
-  "suka",
-  "kailan",
-  "ilang",
-  "araw",
-];
-
 function includesAny(text, terms) {
   return terms.some((term) => text.includes(term));
-}
-
-function detectPatientLanguage(text) {
-  const normalized = ` ${String(text || "").toLowerCase()} `;
-  let tagalogHits = 0;
-  for (const marker of TAGALOG_LANGUAGE_MARKERS) {
-    if (normalized.includes(` ${marker} `)) tagalogHits += 1;
-  }
-  return tagalogHits >= 2 ? "tl" : "en";
 }
 
 function extractMatchedSymptoms(symptoms) {
@@ -241,183 +200,55 @@ function normalizeResult(result = {}) {
   };
 }
 
-function buildFollowUpQuestions(symptoms, urgency, possibleIssue, language) {
+function buildTagalogFollowUpQuestions(symptoms, urgency, possibleIssue) {
   const text = String(symptoms || "").toLowerCase();
   const issue = String(possibleIssue || "").toLowerCase();
-  const isTagalog = language === "tl";
 
   if (urgency === "HIGH") {
     if (includesAny(text, ["dibdib", "chest pain", "hirap huminga", "shortness of breath"])) {
-      return isTagalog
-        ? [
-            "Kailan eksaktong nagsimula ang pananakit ng dibdib o hirap sa paghinga?",
-            "Lumalala ba ngayon ang sintomas o may kasamang panlalamig/pagpapawis?",
-          ]
-        : [
-            "When exactly did the chest pain or breathing difficulty start?",
-            "Are your symptoms getting worse now, or do you also have cold sweats?",
-          ];
+      return [
+        "Kailan eksaktong nagsimula ang pananakit ng dibdib o hirap sa paghinga?",
+        "Lumalala ba ngayon ang sintomas o may kasamang panlalamig/pagpapawis?",
+      ];
     }
-    return isTagalog
-      ? [
-          "Kailan nagsimula ang matinding sintomas na ito?",
-          "Lumalala ba ang sintomas sa ngayon?",
-        ]
-      : [
-          "When did these severe symptoms begin?",
-          "Are the symptoms worsening right now?",
-        ];
+    return [
+      "Kailan nagsimula ang matinding sintomas na ito?",
+      "Lumalala ba ang sintomas sa ngayon?",
+    ];
   }
 
   if (issue.includes("gastro") || includesAny(text, ["suka", "pagtatae", "tiyan", "stomach"])) {
-    return isTagalog
-      ? [
-          "Ilang beses ka nang nagsuka o nagtae ngayong araw?",
-          "May senyales ba ng dehydration tulad ng tuyong bibig o kaunting ihi?",
-        ]
-      : [
-          "How many times have you vomited or had diarrhea today?",
-          "Any signs of dehydration like dry mouth or reduced urination?",
-        ];
+    return [
+      "Ilang beses ka nang nagsuka o nagtae ngayong araw?",
+      "May senyales ba ng dehydration tulad ng tuyong bibig o kaunting ihi?",
+    ];
   }
 
   if (issue.includes("respiratory") || includesAny(text, ["ubo", "lagnat", "lalamunan", "sipon"])) {
-    return isTagalog
-      ? [
-          "Ilang araw mo nang nararanasan ang ubo o lagnat?",
-          "May hirap ka ba sa paghinga o pananakit ng dibdib?",
-        ]
-      : [
-          "How many days have you had cough or fever?",
-          "Do you have breathing difficulty or chest pain?",
-        ];
+    return [
+      "Ilang araw mo nang nararanasan ang ubo o lagnat?",
+      "May hirap ka ba sa paghinga o pananakit ng dibdib?",
+    ];
   }
 
   if (issue.includes("neuro") || includesAny(text, ["sakit ng ulo", "nahihilo", "pagkahilo"])) {
-    return isTagalog
-      ? [
-          "Gaano katindi ang sakit ng ulo o hilo mula 1 hanggang 10?",
-          "May kasabay bang pagsusuka, panlalabo ng paningin, o panghihina?",
-        ]
-      : [
-          "How severe is the headache or dizziness from 1 to 10?",
-          "Do you also have vomiting, blurred vision, or weakness?",
-        ];
+    return [
+      "Gaano katindi ang sakit ng ulo o hilo mula 1 hanggang 10?",
+      "May kasabay bang pagsusuka, panlalabo ng paningin, o panghihina?",
+    ];
   }
 
   if (urgency === "MEDIUM") {
-    return isTagalog
-      ? [
-          "Kailan nagsimula ang mga sintomas at lumalala ba ito?",
-          "May iba ka pa bang sintomas tulad ng hirap sa paghinga o matinding sakit?",
-        ]
-      : [
-          "When did the symptoms start, and are they getting worse?",
-          "Do you have any other symptoms like breathing difficulty or severe pain?",
-        ];
+    return [
+      "Kailan nagsimula ang mga sintomas at lumalala ba ito?",
+      "May iba ka pa bang sintomas tulad ng hirap sa paghinga o matinding sakit?",
+    ];
   }
 
-  return isTagalog
-    ? [
-        "Kailan mo unang napansin ang sintomas?",
-        "Mas gumagaan ba, pareho lang, o lumalala ang pakiramdam mo?",
-      ]
-    : [
-        "When did you first notice the symptom?",
-        "Are you feeling better, unchanged, or worse?",
-      ];
-}
-
-function localizeResult(result, language) {
-  if (language !== "tl") return result;
-
-  const possibleIssueMap = {
-    "Cardiopulmonary symptoms": "Sintomas sa puso o paghinga",
-    "Bleeding symptoms": "Sintomas ng pagdurugo",
-    "Neurological symptoms": "Sintomas sa nerbiyos o utak",
-    "Respiratory or infectious symptoms": "Sintomas sa paghinga o posibleng impeksyon",
-    "Gastrointestinal symptoms": "Sintomas sa tiyan o bituka",
-    "Musculoskeletal discomfort": "Pananakit ng kalamnan o kasu-kasuan",
-    "General symptom report": "Pangkalahatang ulat ng sintomas",
-  };
-
-  const recommendationMap = {
-    "Direct patient to the nearest emergency room immediately — do not wait for a routine appointment.":
-      "I-refer agad ang pasyente sa pinakamalapit na emergency room — huwag maghintay ng regular na appointment.",
-    "Direct patient to the nearest emergency room immediately.":
-      "I-refer agad ang pasyente sa pinakamalapit na emergency room.",
-    "Direct patient to the nearest emergency room immediately — do not wait.":
-      "I-refer agad ang pasyente sa pinakamalapit na emergency room — huwag nang maghintay.",
-    "Book the next available urgent slot today. If symptoms worsen, direct patient to emergency services.":
-      "I-book ang pinakamalapit na urgent slot ngayong araw. Kapag lumala ang sintomas, i-refer sa emergency services.",
-    "Schedule a priority appointment within 24–48 hours.":
-      "Mag-schedule ng priority appointment sa loob ng 24–48 oras.",
-    "Routine appointment within the week is appropriate.":
-      "Ang regular na appointment sa loob ng linggong ito ay angkop.",
-    "Schedule an appointment and monitor symptoms until seen.":
-      "Magpa-schedule ng appointment at bantayan ang sintomas habang hinihintay ang konsultasyon.",
-  };
-
-  const summaryMap = {
-    "Patient reports chest pain combined with breathing difficulty.":
-      "Iniulat ng pasyente ang pananakit ng dibdib na may kasamang hirap sa paghinga.",
-    "Patient reports severe or heavy bleeding.":
-      "Iniulat ng pasyente ang matindi o malakas na pagdurugo.",
-    "Patient reports possible stroke warning signs.":
-      "Iniulat ng pasyente ang mga posibleng babalang palatandaan ng stroke.",
-    "Patient reports severe or high-risk symptoms requiring urgent in-clinic review.":
-      "Iniulat ng pasyente ang matindi o mataas na panganib na sintomas na nangangailangan ng agarang pagsusuri sa klinika.",
-    "Patient reports moderate ongoing symptoms that need priority scheduling.":
-      "Iniulat ng pasyente ang tuloy-tuloy na katamtamang sintomas na nangangailangan ng priority scheduling.",
-    "Patient reports mild non-specific symptoms.":
-      "Iniulat ng pasyente ang banayad at hindi tiyak na mga sintomas.",
-  };
-
-  const reasonMap = {
-    "Chest pain": "Pananakit ng dibdib",
-    "Shortness of breath": "Hirap sa paghinga",
-    "Severe bleeding": "Matinding pagdurugo",
-    "Stroke warning signs": "Palatandaan ng stroke",
-    "Facial droop": "Paglaylay ng isang bahagi ng mukha",
-    "Slurred speech": "Bulol o hirap magsalita",
-    "One-sided weakness": "Panghihina ng isang bahagi ng katawan",
-    "Moderate symptom pattern reported": "May naitalang katamtamang tindi ng sintomas",
-    "Priority appointment recommended": "Inirerekomenda ang priority appointment",
-    "Mild symptom pattern reported": "May naitalang banayad na sintomas",
-    "Routine appointment is appropriate": "Ang regular na appointment ay angkop",
-    "Severe symptom pattern reported": "May naitalang matinding sintomas",
-    "Urgent appointment recommended": "Inirerekomenda ang agarang appointment",
-    "Fever": "Lagnat",
-    "Headache": "Sakit ng ulo",
-    "Cough": "Ubo",
-    "Sore throat": "Masakit na lalamunan",
-    "Dizziness": "Pagkahilo",
-    "Vomiting": "Pagsusuka",
-    "Diarrhea": "Pagtatae",
-  };
-
-  const localizedReasons = Array.isArray(result.urgency_reasons)
-    ? result.urgency_reasons.map((reason) => reasonMap[reason] || reason)
-    : [];
-
-  const localizedSummary =
-    summaryMap[result.summary] ||
-    result.summary
-      .replace(/^Patient reports /, "Iniulat ng pasyente ang ")
-      .replace("severe or high-risk symptoms including", "matindi o mataas na panganib na sintomas kabilang ang")
-      .replace("moderate symptoms including", "katamtamang sintomas kabilang ang")
-      .replace("mild symptoms including", "banayad na sintomas kabilang ang");
-
-  return {
-    ...result,
-    summary: localizedSummary,
-    possible_issue: possibleIssueMap[result.possible_issue] || result.possible_issue,
-    recommendation: recommendationMap[result.recommendation] || result.recommendation,
-    safety_message: result.safety_message
-      ? "Pumunta agad sa pinakamalapit na emergency room o tumawag sa emergency services."
-      : result.safety_message,
-    urgency_reasons: localizedReasons,
-  };
+  return [
+    "Kailan mo unang napansin ang sintomas?",
+    "Mas gumagaan ba, pareho lang, o lumalala ang pakiramdam mo?",
+  ];
 }
 
 function mockTriage(symptoms) {
@@ -636,7 +467,6 @@ export async function analyzeSymptomsController(req, res) {
     const emergencyResult = detectEmergencyRedFlags(combinedInput);
     const rawResult = emergencyResult || (await runLlmAnalysis(combinedInput));
     const normalized = normalizeResult(rawResult);
-    const patientLanguage = detectPatientLanguage(combinedInput);
 
     if (!normalized.urgency_reasons.length) {
       normalized.urgency_reasons = buildUrgencyReasons(combinedInput, normalized.urgency);
@@ -646,15 +476,14 @@ export async function analyzeSymptomsController(req, res) {
     if (context) {
       normalized.missing_info_questions = [];
     } else if (!normalized.safety_override) {
-      normalized.missing_info_questions = buildFollowUpQuestions(
+      normalized.missing_info_questions = buildTagalogFollowUpQuestions(
         combinedInput,
         normalized.urgency,
-        normalized.possible_issue,
-        patientLanguage
+        normalized.possible_issue
       );
     }
 
-    return res.json(localizeResult(normalized, patientLanguage));
+    return res.json(normalized);
   } catch (error) {
     console.error("Triage analysis error:", error);
     return res.status(500).json({ error: "Failed to analyze symptoms" });
