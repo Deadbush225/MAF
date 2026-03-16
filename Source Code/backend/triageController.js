@@ -1,4 +1,8 @@
-const SYSTEM_PROMPT = `You are an AI intake triage assistant for a medical clinic.
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const BASE_SYSTEM_PROMPT = `You are an AI intake triage assistant for a medical clinic.
 Your ONLY job is to help clinic staff prioritize appointment scheduling based on reported symptoms.
 You are NOT a doctor. Do NOT provide diagnoses, prescribe treatments, or give medical advice.
 The patient may speak in English, Tagalog, or Taglish.
@@ -6,6 +10,8 @@ The patient may speak in English, Tagalog, or Taglish.
 Analyze the reported symptoms and determine how urgently this patient needs an appointment.
 Return strict JSON only, in this exact format:
 {
+  "esi_level": <integer 1-5>,
+  "esi_category": "Resuscitation | Emergent | Urgent | Semi-Urgent | Non-Urgent",
   "urgency": "LOW | MEDIUM | HIGH",
   "summary": "A brief, objective description of the reported symptoms for clinic staff — describe what was said, not what you think is wrong",
   "possible_issue": "Broad symptom category only (e.g. 'Respiratory symptoms', 'Gastrointestinal complaint', 'Musculoskeletal discomfort') — never a specific diagnosis",
@@ -17,13 +23,48 @@ Rules:
 - HIGH: Patient may need to be seen within hours. Recommend an urgent same-day booking or direct the patient to emergency services if no slot is available.
 - MEDIUM: Patient should be seen today or within 24–48 hours. Recommend a priority booking.
 - LOW: Routine scheduling within the week is appropriate.
+- ESI 1 (Resuscitation): immediate life-saving intervention likely needed.
+- ESI 2 (Emergent): high-risk condition, severe pain/distress, or danger signs; rapid evaluation needed.
+- ESI 3 (Urgent): stable but likely needing multiple resources; evaluate soon.
+- ESI 4 (Semi-Urgent): stable, likely one resource.
+- ESI 5 (Non-Urgent): stable, low acuity, likely no resources.
+- Align urgency with ESI: ESI 1-2 => HIGH, ESI 3 => MEDIUM, ESI 4-5 => LOW.
 - summary: neutral, objective. Describe reported symptoms only.
 - possible_issue: symptom category only — never a diagnosed condition like "appendicitis" or "GERD".
 - recommendation: clinic workflow only — scheduling, walk-in, or ER referral. Never suggest medications, tests, or treatments.
 - confidence: 90+ if pattern is very clear, 60–89 if partially clear, below 60 if vague or insufficient.
 - missing_info_questions: max 2 questions to clarify urgency; empty array [] if information is already sufficient.
-- missing_info_questions: write questions in natural Tagalog.
+- missing_info_questions: write questions in the same language used by the patient (English or Tagalog).
 - NEVER act as a physician. A licensed doctor will evaluate the patient.`;
+
+const ESI_CATEGORY_BY_LEVEL = {
+  1: "Resuscitation",
+  2: "Emergent",
+  3: "Urgent",
+  4: "Semi-Urgent",
+  5: "Non-Urgent",
+};
+
+const ESI_LEVEL_BY_CATEGORY = Object.entries(ESI_CATEGORY_BY_LEVEL).reduce((acc, [level, category]) => {
+  acc[category.toLowerCase()] = Number(level);
+  return acc;
+}, {});
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const referencesDir = path.resolve(__dirname, "../frontend/references");
+
+function safeReadJson(fileName, fallbackValue) {
+  try {
+    const raw = fs.readFileSync(path.join(referencesDir, fileName), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return fallbackValue;
+  }
+}
+
+const symptomReference = safeReadJson("Symptoms.json", []);
+const diseaseEsiReference = safeReadJson("DiseasesESI.json", []);
 
 const SYMPTOM_SIGNAL_MAP = [
   { label: "Chest pain", terms: ["chest pain", "masakit dibdib", "pananakit ng dibdib", "dibdib"] },
@@ -49,6 +90,10 @@ const SYMPTOM_SIGNAL_MAP = [
   { label: "Dizziness", terms: ["dizziness", "nahihilo", "pagkahilo"] },
   { label: "Vomiting", terms: ["vomiting", "vomit", "suka", "nagsusuka"] },
   { label: "Diarrhea", terms: ["diarrhea", "pagtatae", "malabnaw na dumi"] },
+  {
+    label: "Nose bleeding",
+    terms: ["nosebleed", "nose bleed", "bleeding nose", "dugo sa ilong", "pagdurugo sa ilong", "dumudugo ilong"],
+  },
 ];
 
 function includesAny(text, terms) {
@@ -68,6 +113,56 @@ function extractMatchedSymptoms(symptoms) {
   return [...new Set(matched)];
 }
 
+function normalizeSignal(text) {
+  return String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function countReferenceMatches(input, candidates) {
+  const normalizedInput = normalizeSignal(input);
+  return (Array.isArray(candidates) ? candidates : []).reduce((count, candidate) => {
+    const token = normalizeSignal(candidate);
+    if (!token) return count;
+    return normalizedInput.includes(token) ? count + 1 : count;
+  }, 0);
+}
+
+function getRelevantDiseaseReference(symptoms) {
+  const ranked = diseaseEsiReference
+    .map((item) => ({
+      ...item,
+      matchCount: countReferenceMatches(symptoms, item.symptoms),
+    }))
+    .filter((item) => item.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount)
+    .slice(0, 10);
+  return ranked;
+}
+
+function buildReferencePrompt(symptoms) {
+  const relevantDiseases = getRelevantDiseaseReference(symptoms);
+  const symptomsPreview = symptomReference.slice(0, 120);
+
+  const diseaseBlock =
+    relevantDiseases.length > 0
+      ? relevantDiseases
+          .map(
+            (item) =>
+              `- ${item.disease} | ESI ${item.esi_level} (${item.esi_category}) | red flags: ${
+                item.red_flag_symptoms.join(", ") || "none listed"
+              } | matched symptoms: ${item.matchCount}`
+          )
+          .join("\n")
+      : "- No direct disease match found in local reference.";
+
+  return `\nUse the following local structured triage reference as guidance (not diagnosis):\nKnown symptom lexicon sample (${symptomsPreview.length} items): ${symptomsPreview.join(
+    ", "
+  )}\nRelevant disease-ESI reference entries:\n${diseaseBlock}\nPrioritize ESI level using these references when symptoms overlap.`;
+}
+
+function buildSystemPrompt(symptoms) {
+  return `${BASE_SYSTEM_PROMPT}${buildReferencePrompt(symptoms)}`;
+}
+
 function detectEmergencyRedFlags(symptoms) {
   const text = symptoms.toLowerCase();
 
@@ -83,6 +178,8 @@ function detectEmergencyRedFlags(symptoms) {
 
   if (hasChestPain && hasBreathingIssue) {
     return {
+      esi_level: 1,
+      esi_category: "Resuscitation",
       urgency: "HIGH",
       summary: "Patient reports chest pain combined with breathing difficulty.",
       possible_issue: "Cardiopulmonary symptoms",
@@ -104,6 +201,8 @@ function detectEmergencyRedFlags(symptoms) {
 
   if (hasSevereBleeding) {
     return {
+      esi_level: 1,
+      esi_category: "Resuscitation",
       urgency: "HIGH",
       summary: "Patient reports severe or heavy bleeding.",
       possible_issue: "Bleeding symptoms",
@@ -128,6 +227,8 @@ function detectEmergencyRedFlags(symptoms) {
     if (hasOneSidedWeakness) reasons.push("One-sided weakness");
 
     return {
+      esi_level: 1,
+      esi_category: "Resuscitation",
       urgency: "HIGH",
       summary: "Patient reports possible stroke warning signs.",
       possible_issue: "Neurological symptoms",
@@ -172,16 +273,41 @@ function cleanJsonResponse(rawText) {
   return trimmed;
 }
 
+function getUrgencyFromEsi(esiLevel) {
+  if (esiLevel <= 2) return "HIGH";
+  if (esiLevel === 3) return "MEDIUM";
+  return "LOW";
+}
+
+function deriveEsiFromUrgency(urgency) {
+  if (urgency === "HIGH") return 2;
+  if (urgency === "MEDIUM") return 3;
+  return 4;
+}
+
 function normalizeResult(result = {}) {
-  const urgency = ["LOW", "MEDIUM", "HIGH"].includes(String(result.urgency).toUpperCase())
+  const rawEsiLevel = Number(result.esi_level);
+  const esiCategoryText = String(result.esi_category || "").trim().toLowerCase();
+  const levelFromCategory = ESI_LEVEL_BY_CATEGORY[esiCategoryText];
+  const esiLevel =
+    !isNaN(rawEsiLevel) && rawEsiLevel >= 1 && rawEsiLevel <= 5
+      ? Math.round(rawEsiLevel)
+      : levelFromCategory || null;
+
+  const urgencyInput = ["LOW", "MEDIUM", "HIGH"].includes(String(result.urgency).toUpperCase())
     ? String(result.urgency).toUpperCase()
-    : "LOW";
+    : null;
+  const urgency = urgencyInput || getUrgencyFromEsi(esiLevel || 4);
+  const finalEsiLevel = esiLevel || deriveEsiFromUrgency(urgency);
+  const finalEsiCategory = ESI_CATEGORY_BY_LEVEL[finalEsiLevel];
 
   const rawConfidence = Number(result.confidence);
   const confidence =
     !isNaN(rawConfidence) && rawConfidence >= 0 && rawConfidence <= 100 ? Math.round(rawConfidence) : 60;
 
   return {
+    esi_level: finalEsiLevel,
+    esi_category: finalEsiCategory,
     urgency,
     summary: result.summary || "No summary provided.",
     possible_issue: result.possible_issue || "Symptom area to be determined by the attending physician.",
@@ -200,55 +326,194 @@ function normalizeResult(result = {}) {
   };
 }
 
-function buildTagalogFollowUpQuestions(symptoms, urgency, possibleIssue) {
+function detectFollowUpLanguage(symptoms) {
+  const text = String(symptoms || "").toLowerCase();
+  const tagalogHints = [
+    "ako",
+    "ko",
+    "po",
+    "nang",
+    "may",
+    "wala",
+    "hindi",
+    "masakit",
+    "sakit",
+    "ulo",
+    "nahihilo",
+    "lagnat",
+    "ubo",
+    "pagdurugo",
+    "dugo",
+    "ilong",
+    "tiyan",
+    "pagtatae",
+    "nagsusuka",
+    "kailan",
+    "gaano",
+  ];
+  const englishHints = [
+    "i",
+    "my",
+    "have",
+    "with",
+    "and",
+    "headache",
+    "fever",
+    "cough",
+    "bleeding",
+    "nose",
+    "stomach",
+    "pain",
+    "dizzy",
+    "vomit",
+    "diarrhea",
+    "when",
+    "how",
+    "days",
+  ];
+
+  const tokenize = (input) => input.match(/[a-zA-Z]+/g) || [];
+  const words = tokenize(text);
+
+  let tagalogScore = 0;
+  let englishScore = 0;
+
+  for (const word of words) {
+    if (tagalogHints.includes(word)) tagalogScore += 1;
+    if (englishHints.includes(word)) englishScore += 1;
+  }
+
+  if (tagalogScore > englishScore) return "tagalog";
+  return "english";
+}
+
+function buildFollowUpQuestions(symptoms, urgency, possibleIssue) {
   const text = String(symptoms || "").toLowerCase();
   const issue = String(possibleIssue || "").toLowerCase();
+  const language = detectFollowUpLanguage(symptoms);
+  const isTagalog = language === "tagalog";
+  const hasRespiratorySignals = includesAny(text, ["ubo", "lagnat", "lalamunan", "sipon", "cough", "fever", "sore throat"]);
+  const hasGastroSignals = includesAny(text, ["suka", "pagtatae", "tiyan", "stomach", "vomit", "diarrhea"]);
+  const hasNeuroSignals = includesAny(text, ["sakit ng ulo", "headache", "nahihilo", "pagkahilo", "hilo"]);
+  const hasBleedingSignals = includesAny(text, [
+    "nosebleed",
+    "nose bleed",
+    "bleeding nose",
+    "dugo sa ilong",
+    "pagdurugo sa ilong",
+    "dumudugo ilong",
+    "bleeding",
+    "pagdurugo",
+    "dumudugo",
+  ]);
+  const issueRespiratory = issue.includes("respiratory");
+  const issueGastro = issue.includes("gastro");
+  const issueNeuro = issue.includes("neuro");
+  const issueBleeding = issue.includes("bleed");
 
   if (urgency === "HIGH") {
     if (includesAny(text, ["dibdib", "chest pain", "hirap huminga", "shortness of breath"])) {
-      return [
-        "Kailan eksaktong nagsimula ang pananakit ng dibdib o hirap sa paghinga?",
-        "Lumalala ba ngayon ang sintomas o may kasamang panlalamig/pagpapawis?",
-      ];
+      return isTagalog
+        ? [
+            "Kailan eksaktong nagsimula ang pananakit ng dibdib o hirap sa paghinga?",
+            "Lumalala ba ngayon ang sintomas o may kasamang panlalamig/pagpapawis?",
+          ]
+        : [
+            "Exactly when did the chest pain or breathing difficulty start?",
+            "Are the symptoms getting worse now, with cold sweats or clammy skin?",
+          ];
     }
-    return [
-      "Kailan nagsimula ang matinding sintomas na ito?",
-      "Lumalala ba ang sintomas sa ngayon?",
-    ];
+    return isTagalog
+      ? [
+          "Kailan nagsimula ang matinding sintomas na ito?",
+          "Lumalala ba ang sintomas sa ngayon?",
+        ]
+      : [
+          "When did these severe symptoms start?",
+          "Are your symptoms worsening right now?",
+        ];
   }
 
-  if (issue.includes("gastro") || includesAny(text, ["suka", "pagtatae", "tiyan", "stomach"])) {
-    return [
-      "Ilang beses ka nang nagsuka o nagtae ngayong araw?",
-      "May senyales ba ng dehydration tulad ng tuyong bibig o kaunting ihi?",
-    ];
+  if (hasBleedingSignals || issueBleeding) {
+    if (hasNeuroSignals) {
+      return isTagalog
+        ? [
+            "Gaano kadalas at gaano karami ang pagdurugo sa ilong mo?",
+            "May kasabay bang matinding sakit ng ulo, hilo, o panlalabo ng paningin?",
+          ]
+        : [
+            "How often does the nose bleeding happen, and how much blood comes out?",
+            "Do you also have severe headache, dizziness, or blurred vision?",
+          ];
+    }
+    return isTagalog
+      ? [
+          "Gaano kadalas at gaano karami ang pagdurugo sa ilong mo?",
+          "Tuloy-tuloy pa ba ang pagdurugo ngayon o huminto na?",
+        ]
+      : [
+          "How often does the nose bleeding happen, and how much blood comes out?",
+          "Is the bleeding still ongoing now, or has it stopped?",
+        ];
   }
 
-  if (issue.includes("respiratory") || includesAny(text, ["ubo", "lagnat", "lalamunan", "sipon"])) {
-    return [
-      "Ilang araw mo nang nararanasan ang ubo o lagnat?",
-      "May hirap ka ba sa paghinga o pananakit ng dibdib?",
-    ];
+  if (hasGastroSignals || issueGastro) {
+    return isTagalog
+      ? [
+          "Ilang beses ka nang nagsuka o nagtae ngayong araw?",
+          "May senyales ba ng dehydration tulad ng tuyong bibig o kaunting ihi?",
+        ]
+      : [
+          "How many times have you vomited or had diarrhea today?",
+          "Do you have dehydration signs like dry mouth or very little urine?",
+        ];
   }
 
-  if (issue.includes("neuro") || includesAny(text, ["sakit ng ulo", "nahihilo", "pagkahilo"])) {
-    return [
-      "Gaano katindi ang sakit ng ulo o hilo mula 1 hanggang 10?",
-      "May kasabay bang pagsusuka, panlalabo ng paningin, o panghihina?",
-    ];
+  if ((hasRespiratorySignals && !hasNeuroSignals) || (issueRespiratory && !hasNeuroSignals)) {
+    return isTagalog
+      ? [
+          "Ilang araw mo nang nararanasan ang ubo o lagnat?",
+          "May hirap ka ba sa paghinga o pananakit ng dibdib?",
+        ]
+      : [
+          "How many days have you had cough or fever?",
+          "Do you also have breathing difficulty or chest pain?",
+        ];
+  }
+
+  if (hasNeuroSignals || issueNeuro) {
+    return isTagalog
+      ? [
+          "Gaano katindi ang sakit ng ulo o hilo mula 1 hanggang 10?",
+          "May kasabay bang pagsusuka, panlalabo ng paningin, o panghihina?",
+        ]
+      : [
+          "How severe is your headache or dizziness from 1 to 10?",
+          "Do you also have vomiting, blurred vision, or weakness?",
+        ];
   }
 
   if (urgency === "MEDIUM") {
-    return [
-      "Kailan nagsimula ang mga sintomas at lumalala ba ito?",
-      "May iba ka pa bang sintomas tulad ng hirap sa paghinga o matinding sakit?",
-    ];
+    return isTagalog
+      ? [
+          "Kailan nagsimula ang mga sintomas at lumalala ba ito?",
+          "May iba ka pa bang sintomas tulad ng hirap sa paghinga o matinding sakit?",
+        ]
+      : [
+          "When did the symptoms start, and are they getting worse?",
+          "Do you have other symptoms like breathing difficulty or severe pain?",
+        ];
   }
 
-  return [
-    "Kailan mo unang napansin ang sintomas?",
-    "Mas gumagaan ba, pareho lang, o lumalala ang pakiramdam mo?",
-  ];
+  return isTagalog
+    ? [
+        "Kailan mo unang napansin ang sintomas?",
+        "Mas gumagaan ba, pareho lang, o lumalala ang pakiramdam mo?",
+      ]
+    : [
+        "When did you first notice the symptom?",
+        "Are you feeling better, the same, or worse?",
+      ];
 }
 
 function mockTriage(symptoms) {
@@ -287,7 +552,19 @@ function mockTriage(symptoms) {
   const hasPediatricOrElderlyRisk = includesAny(text, ["baby", "infant", "elderly", "senior", "matanda"]);
   const symptomCount = matchedSymptoms.length;
 
-  const likelyIssue = includesAny(text, ["cough", "ubo", "sore throat", "lagnat", "fever"])
+  const likelyIssue = includesAny(text, [
+    "nosebleed",
+    "nose bleed",
+    "bleeding nose",
+    "dugo sa ilong",
+    "pagdurugo sa ilong",
+    "dumudugo ilong",
+    "bleeding",
+    "pagdurugo",
+    "dumudugo",
+  ])
+    ? "Bleeding symptoms"
+    : includesAny(text, ["cough", "ubo", "sore throat", "lagnat", "fever"])
     ? "Respiratory or infectious symptoms"
     : includesAny(text, ["vomit", "suka", "diarrhea", "pagtatae", "stomach", "tiyan"])
     ? "Gastrointestinal symptoms"
@@ -347,7 +624,7 @@ function mockTriage(symptoms) {
   };
 }
 
-async function callGroq(apiKey, model, symptoms) {
+async function callGroq(apiKey, model, symptoms, systemPrompt) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -357,7 +634,7 @@ async function callGroq(apiKey, model, symptoms) {
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: `Patient symptoms: ${symptoms}` },
       ],
       temperature: 0.1,
@@ -373,7 +650,7 @@ async function callGroq(apiKey, model, symptoms) {
   return data?.choices?.[0]?.message?.content || "{}";
 }
 
-async function callOpenRouter(apiKey, model, symptoms) {
+async function callOpenRouter(apiKey, model, symptoms, systemPrompt) {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -383,7 +660,7 @@ async function callOpenRouter(apiKey, model, symptoms) {
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: `Patient symptoms: ${symptoms}` },
       ],
       temperature: 0.1,
@@ -399,7 +676,7 @@ async function callOpenRouter(apiKey, model, symptoms) {
   return data?.choices?.[0]?.message?.content || "{}";
 }
 
-async function callTogether(apiKey, model, symptoms) {
+async function callTogether(apiKey, model, symptoms, systemPrompt) {
   const response = await fetch("https://api.together.xyz/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -409,7 +686,7 @@ async function callTogether(apiKey, model, symptoms) {
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: `Patient symptoms: ${symptoms}` },
       ],
       temperature: 0.1,
@@ -429,26 +706,31 @@ async function runLlmAnalysis(symptoms) {
   const provider = (process.env.LLM_PROVIDER || "mock").toLowerCase();
   const apiKey = process.env.LLM_API_KEY;
   const model = process.env.LLM_MODEL || "llama-3.1-8b-instant";
+  const systemPrompt = buildSystemPrompt(symptoms);
 
-  if (provider === "mock" || !apiKey) {
-    return mockTriage(symptoms);
+  if (provider === "mock") {
+    return { result: mockTriage(symptoms), provider: "mock", model };
+  }
+
+  if (!apiKey) {
+    throw new Error(`LLM_API_KEY is required when LLM_PROVIDER is '${provider}'.`);
   }
 
   let rawOutput = "{}";
 
   if (provider === "groq") {
-    rawOutput = await callGroq(apiKey, model, symptoms);
+    rawOutput = await callGroq(apiKey, model, symptoms, systemPrompt);
   } else if (provider === "openrouter") {
-    rawOutput = await callOpenRouter(apiKey, model, symptoms);
+    rawOutput = await callOpenRouter(apiKey, model, symptoms, systemPrompt);
   } else if (provider === "together") {
-    rawOutput = await callTogether(apiKey, model, symptoms);
+    rawOutput = await callTogether(apiKey, model, symptoms, systemPrompt);
   } else {
     throw new Error("Unsupported LLM provider. Use mock, groq, openrouter, or together.");
   }
 
   const cleaned = cleanJsonResponse(rawOutput);
   const parsed = JSON.parse(cleaned);
-  return normalizeResult(parsed);
+  return { result: normalizeResult(parsed), provider, model };
 }
 
 export async function analyzeSymptomsController(req, res) {
@@ -465,8 +747,12 @@ export async function analyzeSymptomsController(req, res) {
       : symptoms;
 
     const emergencyResult = detectEmergencyRedFlags(combinedInput);
-    const rawResult = emergencyResult || (await runLlmAnalysis(combinedInput));
+    const llmResult = emergencyResult ? null : await runLlmAnalysis(combinedInput);
+    const rawResult = emergencyResult || llmResult.result;
     const normalized = normalizeResult(rawResult);
+    normalized.analysis_source = emergencyResult ? "rule_based_emergency" : "llm";
+    normalized.llm_provider = emergencyResult ? null : llmResult.provider;
+    normalized.llm_model = emergencyResult ? null : llmResult.model;
 
     if (!normalized.urgency_reasons.length) {
       normalized.urgency_reasons = buildUrgencyReasons(combinedInput, normalized.urgency);
@@ -476,7 +762,7 @@ export async function analyzeSymptomsController(req, res) {
     if (context) {
       normalized.missing_info_questions = [];
     } else if (!normalized.safety_override) {
-      normalized.missing_info_questions = buildTagalogFollowUpQuestions(
+      normalized.missing_info_questions = buildFollowUpQuestions(
         combinedInput,
         normalized.urgency,
         normalized.possible_issue

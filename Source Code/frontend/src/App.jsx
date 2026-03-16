@@ -2,6 +2,7 @@ import { Link, Route, Routes } from "react-router-dom";
 import { useMemo, useState } from "react";
 import PatientTriage from "./PatientTriage";
 import DoctorDashboard from "./DoctorDashboard";
+import lingappLogo from "../img/lingapp_Budokan_Rounded.png";
 
 function App() {
   const [queue, setQueue] = useState([]);
@@ -25,11 +26,18 @@ function App() {
     <div className="mx-auto min-h-screen w-full max-w-6xl px-4 py-6 md:px-8">
       <header className="mb-6 rounded-3xl border border-slate-200/80 bg-white/80 p-4 backdrop-blur">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
+          <div className="flex items-center gap-4">
+            <img
+              src={lingappLogo}
+              alt="Lingapp logo"
+              className="h-14 w-auto rounded-xl border border-slate-200 bg-white p-1 md:h-16"
+            />
+            <div>
             <h1 className="font-headline text-2xl font-bold text-slate-900 md:text-3xl">
               Voice AI Medical Triage
             </h1>
             <p className="text-sm text-slate-600">Hackathon MVP using Agora + LLM analysis</p>
+            </div>
           </div>
           <nav className="flex items-center gap-3">
             <Link
