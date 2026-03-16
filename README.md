@@ -2,7 +2,11 @@
 
 <img src="SourceCode/frontend/img/github%20readme%20banner.png" alt="LINGAPP Banner Top" width="900">
 
+Live Application Here : https://lingapp-maf.vercel.app/
+
 An AI-assisted medical intake system that lets patients speak or type their symptoms, summarizes their concerns into a cleaner clinical format, and helps triage urgency before suggesting available doctor schedules near the patient.
+
+> The LLM used for categorizing urgency is based on the National Health Services' data of UK.
 
 ## Features
 
@@ -126,6 +130,8 @@ Frontend default URL: `http://localhost:5173`
 
 The web experience is designed for fast intake and triage with AI-guided follow-ups.
 
+Try the patient workflow here: https://lingapp-maf.vercel.app/
+
 ### Front Banner and Intake Screen
 <img src="SourceCode/frontend/img/front.png" alt="Front Banner and Intake Screen" width="900">
 
@@ -138,11 +144,7 @@ The web experience is designed for fast intake and triage with AI-guided follow-
 
 The backend handles AI response generation, symptom cleaning, and triage-ready formatting for scheduling recommendations.
 
-### Intake Processing Pipeline
-<img src="https://placehold.co/1200x500?text=Placeholder+Backend+Pipeline" alt="Placeholder Backend Pipeline" width="900">
-
-### Scheduling Suggestion Logic
-<img src="https://placehold.co/1200x500?text=Placeholder+Doctor+Schedule+Suggestions" alt="Placeholder Doctor Schedule Suggestions" width="900">
+<img src="SourceCode/frontend/img/AI Workflow Diagram.png" alt="Backend Pipeline" width="900">
 
 ---
 ## Comprehensive Repository Structure
