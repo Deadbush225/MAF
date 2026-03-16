@@ -241,6 +241,40 @@ function detectEmergencyRedFlags(symptoms) {
     };
   }
 
+  const hasSnakeOrAnimalBite = includesAny(text, [
+    "anaconda",
+    "snake bite",
+    "snakebite",
+    "bitten by snake",
+    "bitten by anaconda",
+    "ahas",
+    "kagat ng ahas",
+    "nakagat ng ahas",
+    "animal bite",
+    "bitten by dog",
+    "dog bite",
+    "kagat ng aso",
+    "nakagat ng aso",
+    "venomous bite",
+    "venom",
+  ]);
+
+  if (hasSnakeOrAnimalBite) {
+    return {
+      esi_level: 2,
+      esi_category: "Emergent",
+      urgency: "HIGH",
+      summary: "Patient reports a possible snake or animal bite exposure.",
+      possible_issue: "Bite or envenomation risk",
+      recommendation: "Arrange urgent same-day emergency evaluation immediately, especially for possible venomous bites.",
+      urgency_reasons: ["Possible snake/animal bite exposure"],
+      safety_override: true,
+      safety_message: "Please go to the nearest emergency room immediately for bite assessment.",
+      confidence: 99,
+      missing_info_questions: [],
+    };
+  }
+
   const hasHighRiskInfectiousKeyword = includesAny(text, [
     "ebola",
     "ebola virus",
@@ -478,7 +512,15 @@ async function callGroq(apiKey, model, symptoms, systemPrompt) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Groq error: ${errorText}`);
+    const error = new Error(`Groq error: ${errorText}`);
+    error.status = response.status;
+    error.provider = "groq";
+    error.raw = errorText;
+    const retryAfterHeader = Number(response.headers.get("retry-after"));
+    if (!isNaN(retryAfterHeader) && retryAfterHeader > 0) {
+      error.retry_after_seconds = retryAfterHeader;
+    }
+    throw error;
   }
 
   const data = await response.json();
@@ -553,14 +595,28 @@ async function runLlmAnalysis(symptoms) {
 
   let rawOutput = "{}";
 
-  if (provider === "groq") {
-    rawOutput = await callGroq(apiKey, model, symptoms, systemPrompt);
-  } else if (provider === "openrouter") {
-    rawOutput = await callOpenRouter(apiKey, model, symptoms, systemPrompt);
-  } else if (provider === "together") {
-    rawOutput = await callTogether(apiKey, model, symptoms, systemPrompt);
-  } else {
-    throw new Error("Unsupported LLM provider. Use mock, groq, openrouter, or together.");
+  try {
+    if (provider === "groq") {
+      rawOutput = await callGroq(apiKey, model, symptoms, systemPrompt);
+    } else if (provider === "openrouter") {
+      rawOutput = await callOpenRouter(apiKey, model, symptoms, systemPrompt);
+    } else if (provider === "together") {
+      rawOutput = await callTogether(apiKey, model, symptoms, systemPrompt);
+    } else {
+      throw new Error("Unsupported LLM provider. Use mock, groq, openrouter, or together.");
+    }
+  } catch (error) {
+    const message = String(error?.message || "").toLowerCase();
+    const isRateLimit =
+      Number(error?.status) === 429 ||
+      message.includes("rate limit") ||
+      message.includes("rate_limit_exceeded");
+
+    if (provider === "groq" && isRateLimit) {
+      return { result: mockTriage(symptoms), provider: "mock", model: "rate_limit_fallback" };
+    }
+
+    throw error;
   }
 
   const cleaned = cleanJsonResponse(rawOutput);
