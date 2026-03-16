@@ -241,6 +241,31 @@ function detectEmergencyRedFlags(symptoms) {
     };
   }
 
+  const hasHighRiskInfectiousKeyword = includesAny(text, [
+    "ebola",
+    "ebola virus",
+    "hemorrhagic fever",
+    "viral hemorrhagic fever",
+    "marburg",
+    "marburg virus",
+  ]);
+
+  if (hasHighRiskInfectiousKeyword) {
+    return {
+      esi_level: 2,
+      esi_category: "Emergent",
+      urgency: "HIGH",
+      summary: "Patient reports a high-risk infectious disease concern.",
+      possible_issue: "High-risk infectious symptoms",
+      recommendation: "Arrange urgent same-day medical evaluation with isolation precautions; escalate to emergency services if severe symptoms are present.",
+      urgency_reasons: ["High-risk infectious disease concern"],
+      safety_override: true,
+      safety_message: "Please seek urgent in-person medical evaluation immediately and avoid close contact with others.",
+      confidence: 98,
+      missing_info_questions: [],
+    };
+  }
+
   return null;
 }
 

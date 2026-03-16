@@ -1,56 +1,115 @@
-# Voice AI Medical Triage MVP (Hackathon)
+# AI Medical Symptom Triage and Scheduling Assistant
 
-Quick prototype using React + Express + Agora + Web Speech API + LLM analysis.
+<img src="SourceCode/frontend/img/github%20readme%20banner.png" alt="LINGAPP Banner Top" width="900">
 
-## Structure
+An AI-assisted medical intake system that lets patients speak or type their symptoms, summarizes their concerns into a cleaner clinical format, and helps triage urgency before suggesting available doctor schedules near the patient.
 
-- `frontend/` React + Tailwind + Agora Web SDK
-- `backend/` Express API with `POST /analyzeSymptoms`
+## Features
 
-## 1) Backend setup
+- **Voice and Text Input**: Patients can open the app and either speak or write their symptoms.
+- **Smart Symptom Summary**: The assistant generates a cleaner, structured summary from free-form input.
+- **Structured Intake Details**: The system extracts and organizes:
+  - Current Date
+  - Date the symptom started
+  - Area of Concern
+  - Symptoms
+  - Other Additional Information (the AI can ask follow-up questions when needed)
+- **Urgency Categorization**: The AI classifies symptom urgency based on the provided details.
+- **Doctor Schedule Suggestions**: Based on urgency, the system suggests open doctor schedules the patient can choose from, prioritized by nearby hospitals/clinics.
 
-```bash
-cd backend
-cp .env.example .env
-npm install
-npm run dev
+<img src="SourceCode/frontend/img/LingApp_tech%20stack.png" alt="LINGAPP Tech Stack Utilized" width="900">
+
+| Tech Stack | Description |
+| --- | --- |
+| React | Builds the interactive patient web interface for symptom intake, results, and follow-up steps. |
+| CSS | Styles the UI for readability, layout consistency, and responsive patient/staff experience. |
+| Node.js | Runs the backend runtime that processes API requests and integrates model providers. |
+| Express | Provides REST API endpoints for symptom analysis and triage response delivery. |
+| CORS | Enables secure frontend-to-backend communication across development and deployment origins. |
+| Agora RTC SDK | Supports real-time voice communication features used in patient interaction workflows. |
+| Groq | Main LLM provider used to generate structured triage analysis and meaningful follow-up questions. |
+| Gemini | Alternative LLM option for symptom understanding and triage enhancement in multi-provider setups. |
+
+---
+
+## Patient Flow (Web App)
+
+The web experience is designed for fast intake and triage with AI-guided follow-ups.
+
+### Front Banner and Intake Screen
+<img src="https://placehold.co/1200x380?text=Placeholder+Banner+Front" alt="Placeholder Banner Front" width="900">
+
+### Symptom Summary and Urgency Classification
+<img src="https://placehold.co/1200x500?text=Placeholder+Triage+Output" alt="Placeholder Triage Output" width="900">
+
+---
+
+## Backend AI Workflow
+
+The backend handles AI response generation, symptom cleaning, and triage-ready formatting for scheduling recommendations.
+
+### Intake Processing Pipeline
+<img src="https://placehold.co/1200x500?text=Placeholder+Backend+Pipeline" alt="Placeholder Backend Pipeline" width="900">
+
+### Scheduling Suggestion Logic
+<img src="https://placehold.co/1200x500?text=Placeholder+Doctor+Schedule+Suggestions" alt="Placeholder Doctor Schedule Suggestions" width="900">
+
+---
+## Comprehensive Repository Structure
+
+```text
+MAF/
+├── Source Code/
+│   ├── backend/                          # Express API and triage logic
+│   │   ├── server.js                     # Main backend server
+│   │   ├── triageController.js           # Symptom cleanup and urgency flow
+│   │   ├── package.json                  # Backend dependencies and scripts
+│   │   └── .env.example                  # Environment variable template
+│   └── frontend/                         # Vite-based client application
+│       ├── src/                          # React source files
+│       ├── img/                          # Member photos and project images
+│       ├── package.json                  # Frontend dependencies and scripts
+│       └── index.html                    # Frontend HTML entry
+├── NEW_README.md                         # Updated project documentation
+├── README.md                             # Legacy/readme reference
+└── .gitignore                            # Git ignore rules
 ```
 
-Default mode is `LLM_PROVIDER=mock` for free local demo.
+---
+## Project Members
 
-To use a free LLM endpoint:
+<table align="center" border="0" cellpadding="0" cellspacing="0" width="100%">
+  <tr>
+    <td align="center" width="50%">
+      <img src="Source Code/frontend/img/inso.jpg" alt="Eliazar Inso" style="border-radius: 50%; width: 120px; height: 120px; object-fit: cover;"><br>
+      <strong>Eliazar Inso</strong><br>
+      <a href="#">
+        <img src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn">
+      </a>
+    </td>
+    <td align="center" width="50%">
+      <img src="Source Code/frontend/img/adriel.jpg" alt="Adriel Magalona" style="border-radius: 50%; width: 120px; height: 120px; object-fit: cover;"><br>
+      <strong>Adriel Magalona</strong><br>
+      <a href="#">
+        <img src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%" style="padding-top: 20px;">
+      <img src="Source Code/frontend/img/hanzlei.jpg" alt="Hanzlei Jamison" style="border-radius: 50%; width: 120px; height: 120px; object-fit: cover;"><br>
+      <strong>Hanzlei Jamison</strong><br>
+      <a href="#">
+        <img src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn">
+      </a>
+    </td>
+    <td align="center" width="50%" style="padding-top: 20px;">
+      <img src="Source Code/frontend/img/Vince.jpg" alt="Vincent Puti" style="border-radius: 50%; width: 120px; height: 120px; object-fit: cover;"><br>
+      <strong>Vincent Puti</strong><br>
+      <a href="#">
+        <img src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn">
+      </a>
+    </td>
+  </tr>
+</table>
 
-- Set `LLM_PROVIDER=groq` (or `openrouter`, `together`)
-- Add `LLM_API_KEY`
-- Optionally set `LLM_MODEL`
-
-## 2) Frontend setup
-
-```bash
-cd frontend
-cp .env.example .env
-npm install
-npm run dev
-```
-
-Set these in `frontend/.env` if available:
-
-- `VITE_AGORA_APP_ID`
-- `VITE_AGORA_CHANNEL`
-- `VITE_AGORA_TOKEN` (optional for testing if your Agora project allows)
-- `VITE_API_BASE_URL=http://localhost:4000`
-
-If Agora values are missing, app still works using local microphone transcription only.
-
-## MVP Flow
-
-1. Click **Start Triage**
-2. Speak symptoms in English/Tagalog/Taglish
-3. Click **Analyze Symptoms**
-4. View urgency + doctor summary + recommendation
-5. Check **Doctor Queue** page for urgency-sorted list
-
-## Notes
-
-- This is a demo prototype, not a medical device.
-- Web Speech API works best in Chrome-based browsers.
