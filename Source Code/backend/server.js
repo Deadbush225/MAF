@@ -37,6 +37,11 @@ const caeTtsVendor = process.env.AGORA_CAE_TTS_VENDOR || "microsoft";
 const caeTtsParamsJson = process.env.AGORA_CAE_TTS_PARAMS_JSON || "{}";
 const caeRequestTimeoutMs = Number(process.env.AGORA_CAE_REQUEST_TIMEOUT_MS || 12000);
 const geminiApiKey = process.env.GEMINI_API_KEY || "";
+const azureSpeechApiKey = process.env.AZURE_SPEECH_API_KEY || "";
+const azureSpeechRegion = process.env.AZURE_SPEECH_REGION || "";
+const azureSpeechEndpoint = process.env.AZURE_SPEECH_ENDPOINT || "";
+const azureSpeechVoiceName = process.env.AZURE_SPEECH_VOICE_NAME || "en-US-AvaMultilingualNeural";
+const azureSpeechDefaultLocale = process.env.AZURE_SPEECH_DEFAULT_LOCALE || "en-US";
 
 app.use(cors());
 app.use(express.json());
@@ -112,6 +117,36 @@ function buildTtsPayload(ttsParams) {
     };
   }
   return { vendor: caeTtsVendor, params: ttsParams };
+}
+
+function getAzureTtsEndpoint() {
+  if (azureSpeechEndpoint) {
+    const normalizedEndpoint = azureSpeechEndpoint.trim().replace(/\/+$/, "");
+    if (normalizedEndpoint.includes(".api.cognitive.microsoft.com")) {
+      const convertedEndpoint = normalizedEndpoint.replace(
+        ".api.cognitive.microsoft.com",
+        ".tts.speech.microsoft.com"
+      );
+      return `${convertedEndpoint}/cognitiveservices/v1`;
+    }
+    if (normalizedEndpoint.endsWith("/cognitiveservices/v1")) {
+      return normalizedEndpoint;
+    }
+    return `${normalizedEndpoint}/cognitiveservices/v1`;
+  }
+  if (!azureSpeechRegion) return "";
+  return `https://${azureSpeechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
+}
+
+function buildSsml(text, voiceName, locale) {
+  const safeText = String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+  const safeLocale = String(locale || azureSpeechDefaultLocale || "en-US");
+  return `<speak version="1.0" xml:lang="${safeLocale}"><voice name="${voiceName}">${safeText}</voice></speak>`;
 }
 
 app.get("/health", (_req, res) => {
@@ -244,6 +279,50 @@ app.post("/conversationalAgent/stop", async (req, res) => {
     return res.json({ enabled: true, ...data });
   } catch (error) {
     return res.status(500).json({ error: "Failed to stop Conversational AI agent." });
+  }
+});
+
+app.post("/speech/synthesize", async (req, res) => {
+  try {
+    const { text, voiceName, locale } = req.body || {};
+    if (!String(text || "").trim()) {
+      return res.status(400).json({ error: "text is required" });
+    }
+    if (!azureSpeechApiKey) {
+      return res.status(500).json({ error: "AZURE_SPEECH_API_KEY is not configured" });
+    }
+
+    const endpoint = getAzureTtsEndpoint();
+    if (!endpoint) {
+      return res
+        .status(500)
+        .json({ error: "Set AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT for Azure Speech TTS" });
+    }
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Ocp-Apim-Subscription-Key": azureSpeechApiKey,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
+        "User-Agent": "agora-voice-triage",
+      },
+      body: buildSsml(text, voiceName || azureSpeechVoiceName, locale),
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      return res.status(response.status).json({
+        error: "Azure Speech synthesis failed",
+        details,
+      });
+    }
+
+    const audioBuffer = Buffer.from(await response.arrayBuffer());
+    res.setHeader("Content-Type", "audio/mpeg");
+    return res.send(audioBuffer);
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to synthesize speech" });
   }
 });
 

@@ -9,6 +9,7 @@ const AGORA_TOKEN = import.meta.env.VITE_AGORA_TOKEN || null;
 const ENABLE_CONVERSATIONAL_AI =
   String(import.meta.env.VITE_ENABLE_CONVERSATIONAL_AI || "false").toLowerCase() === "true";
 const CAE_START_TIMEOUT_MS = 12000;
+const TRIAGE_RESULT_STORAGE_KEY = "patient-triage-analysis";
 
 function PatientTriage({ onNewCase }) {
   const [isListening, setIsListening] = useState(false);
@@ -40,6 +41,39 @@ function PatientTriage({ onNewCase }) {
   const followUpInterimRef = useRef("");
   const baseSymptomsRef = useRef("");
   const triageRoundRef = useRef(0);
+  const ttsAudioRef = useRef(null);
+  const ttsAbortRef = useRef(null);
+  const ttsObjectUrlRef = useRef("");
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(TRIAGE_RESULT_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved?.analysis) {
+        setAnalysis(saved.analysis);
+      }
+      if (saved?.followUpContext) {
+        setFollowUpContext(saved.followUpContext);
+      }
+    } catch {
+      localStorage.removeItem(TRIAGE_RESULT_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!analysis) {
+      localStorage.removeItem(TRIAGE_RESULT_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(
+      TRIAGE_RESULT_STORAGE_KEY,
+      JSON.stringify({
+        analysis,
+        followUpContext,
+      })
+    );
+  }, [analysis, followUpContext]);
 
   useEffect(() => {
     return () => {
@@ -52,16 +86,64 @@ function PatientTriage({ onNewCase }) {
       fuManualStopRef.current = true;
       if (fuRestartTimerRef.current) clearTimeout(fuRestartTimerRef.current);
       if (fuRecognitionRef.current) fuRecognitionRef.current.stop();
+      if (ttsAbortRef.current) ttsAbortRef.current.abort();
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current.src = "";
+      }
+      if (ttsObjectUrlRef.current) URL.revokeObjectURL(ttsObjectUrlRef.current);
     };
   }, []);
 
-  const speakText = (text) => {
-    if (!text || !window.speechSynthesis) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+  const deleteTriageResult = () => {
+    setAnalysis(null);
+    setFollowUpContext({ question: "", answer: "" });
+  };
+
+  const speakText = async (text) => {
+    if (!String(text || "").trim()) return;
+    setError("");
+    try {
+      if (ttsAbortRef.current) ttsAbortRef.current.abort();
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current.src = "";
+      }
+      if (ttsObjectUrlRef.current) {
+        URL.revokeObjectURL(ttsObjectUrlRef.current);
+        ttsObjectUrlRef.current = "";
+      }
+
+      const controller = new AbortController();
+      ttsAbortRef.current = controller;
+      const localeHint = navigator.language || "en-US";
+      const response = await fetch(`${API_BASE_URL}/speech/synthesize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, locale: localeHint }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Text-to-speech request failed.");
+      }
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      ttsObjectUrlRef.current = audioUrl;
+      const audio = new Audio(audioUrl);
+      ttsAudioRef.current = audio;
+      audio.onended = () => {
+        if (ttsObjectUrlRef.current) URL.revokeObjectURL(ttsObjectUrlRef.current);
+        ttsObjectUrlRef.current = "";
+      };
+      await audio.play();
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        setError(error?.message || "Unable to play synthesized speech.");
+      }
+    } finally {
+      ttsAbortRef.current = null;
+    }
   };
 
   const startConversationalAgent = async (remoteRtcUid) => {
@@ -647,10 +729,10 @@ function PatientTriage({ onNewCase }) {
           </p>
 
           <button
-            onClick={() => speakText(analysis.recommendation)}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+            onClick={deleteTriageResult}
+            className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
           >
-            Read Scheduling Recommendation Aloud
+            Delete Result
           </button>
         </div>
       )}
